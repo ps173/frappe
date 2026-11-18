@@ -23,7 +23,7 @@ class FlowLauncher {
 		this.make();
 		this.bind();
 		this.place();
-		if (this.state.open) this.open({ focus: false, slide: false });
+		if (this.state.open && !embedded_chat()) this.open({ focus: false, slide: false });
 		else prefetch_island();
 	}
 
@@ -74,6 +74,7 @@ class FlowLauncher {
 				event.preventDefault();
 				event.dataTransfer.dropEffect = "none";
 			});
+		window.addEventListener("flow-embedded", () => this.give_way());
 		window.addEventListener("resize", () => this.place());
 		window.addEventListener("pagehide", () => this.save());
 	}
@@ -97,10 +98,18 @@ class FlowLauncher {
 	focus_chat() {
 		if (!this.state.open) return;
 		const chat = this.chat.querySelector(".frappe-island")?.shadowRoot;
-		const target = this.chat_focus?.isConnected
-			? this.chat_focus
-			: chat?.querySelector("[contenteditable=true], textarea");
+		const target = this.chat_focus?.isConnected ? this.chat_focus : composer_in(chat);
 		target?.focus({ preventScroll: true });
+	}
+
+	// a chat on an app's page takes the panel's place. The island keeps its mode in its module,
+	// which both chats would share, so the panel's goes, and a toggle mounts it again later
+	give_way() {
+		if (this.state.open) this.minimize();
+		this.island?.unmount();
+		this.island = null;
+		this.host.removeAttribute("data-ready");
+		this.host.removeAttribute("data-failed");
 	}
 
 	// hidden, not removed, so the chat doesn't lay itself out and animate in again
@@ -123,7 +132,9 @@ class FlowLauncher {
 	}
 
 	toggle() {
-		if (this.state.open) this.minimize();
+		const embedded = embedded_chat();
+		if (embedded) composer_in(embedded.shadowRoot)?.focus({ preventScroll: true });
+		else if (this.state.open) this.minimize();
 		else this.open();
 	}
 
@@ -300,6 +311,15 @@ function prefetch_island() {
 function is_toggle_key(event) {
 	if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return false;
 	return /^[!-~]$/.test(event.key) ? event.key.toLowerCase() === "i" : event.code === "KeyI";
+}
+
+// the chat an app shows on its page, marked by the island; gone once the app leaves that page
+function embedded_chat() {
+	return document.querySelector("[data-flow-embedded]");
+}
+
+function composer_in(root) {
+	return root?.querySelector("[contenteditable=true], textarea");
 }
 
 // the element that has the keyboard, inside shadow roots too
