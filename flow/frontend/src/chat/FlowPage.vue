@@ -1,11 +1,13 @@
 <template>
 	<!-- clip, not hidden: a hidden root still scrolls when focus lands in the closed panel.
 	     The root is the sidebar's colour, so on the /flow page the chat stands on it as a raised
-	     panel; the launcher's panel keeps it flat at any size. The chat, its steps and the
-	     composer all read at Desk's base size (14px), at every width -->
+	     panel; the launcher's panel keeps it flat at any size, and an app's page has the chat on
+	     its own surface, as one with the page. The chat, its steps and the composer all read at
+	     Desk's base size (14px), at every width -->
 	<div
 		ref="root"
-		class="flow-sidebar-surface flex h-full min-h-0 overflow-clip text-base text-ink-gray-8 [--flow-chat-text:theme(fontSize.base)] [--flow-step-text:theme(fontSize.base)]"
+		class="flex h-full min-h-0 overflow-clip text-base text-ink-gray-8 [--flow-chat-text:theme(fontSize.base)] [--flow-step-text:theme(fontSize.base)]"
+		:class="embedded ? 'bg-surface-base' : 'flow-sidebar-surface'"
 	>
 		<SessionSidebar
 			v-if="!noSidebar"
@@ -19,8 +21,12 @@
 		/>
 		<div
 			class="flex min-w-0 flex-1 overflow-clip bg-surface-base"
-			:class="inPanel ? '' : 'md:m-1 md:rounded-5 md:shadow-sm'"
+			:class="embedded ? 'relative' : inPanel ? '' : 'md:m-1 md:rounded-5 md:shadow-sm'"
 		>
+			<!-- the chats, under the app's header, whose All chats opens them -->
+			<div v-if="embedded" class="absolute right-2 top-0">
+				<ChatHistory ref="history" :clock="false" />
+			</div>
 			<RecordPage v-if="pageKind" :kind="pageKind" />
 			<!-- hidden under a page, not taken away: the chat waits as it was, its box's draft and
 			     files too, and inert, so nothing in it answers keys meanwhile -->
@@ -30,7 +36,9 @@
 				:inert="pageKind ? true : null"
 				class="relative flex min-w-0 flex-1 flex-col bg-surface-base"
 			>
+				<!-- an app's page has a header of its own, which the chat's title and actions fill -->
 				<ChatHeader
+					v-if="!embedded"
 					:sidebar-open="sidebarOpen"
 					:workspace="false"
 					:actions="chatActions"
@@ -140,25 +148,28 @@ import { Dialogs, ToastProvider, toast, useColorScheme } from "frappe-ui";
 import { Button } from "frappe-ui/src/components/Button";
 import BrandMark from "@flow/ui-core/components/BrandMark.vue";
 import ChatHeader from "@flow/ui-core/components/ChatHeader.vue";
+import ChatHistory from "@flow/ui-core/components/ChatHistory.vue";
 import Composer from "@flow/ui-core/components/Composer.vue";
 import MessageList from "@flow/ui-core/components/MessageList.vue";
 import SessionSidebar from "@flow/ui-core/components/SessionSidebar.vue";
 import TranscriptDialog from "@flow/ui-core/components/TranscriptDialog.vue";
 import WorkspacePanel from "@flow/ui-core/components/WorkspacePanel.vue";
 import { installShortcuts } from "@flow/ui-core/shortcuts.js";
+import { chatMenuItems } from "@flow/ui-core/chatMenu.js";
 import { installFocusRings } from "@flow/ui-core/focusRings.js";
 import { installViewport } from "@flow/ui-core/viewport.js";
 import { provideComposerHeight } from "@flow/ui-core/composerHeight.js";
 import { provideFileDrop } from "@flow/ui-core/fileDrop.js";
 import { layout, measureLayoutBy } from "@flow/ui-core/layout.js";
 import { createFlowStore } from "@flow/ui-core/store.js";
+import { conversationTitle, hasUsage } from "@flow/ui-core/transcript.js";
 import { __ } from "@flow/ui-core/translate.js";
 
 import { FrappeClient } from "../api/client.js";
 import * as transport from "../api/frappe.js";
 import { connectSocket } from "../api/socket.js";
 import { createPage } from "../page.js";
-import { askedSession, inPanel, panelHost } from "../panel.js";
+import { askedSession, embedded, inPanel, ownsWindow, panelHost } from "../panel.js";
 import RecordPage from "../pages/RecordPage.vue";
 import { FORMS } from "../pages/pages.js";
 import FlowSettings from "../settings/FlowSettings.vue";
@@ -226,8 +237,8 @@ const store = createFlowStore(client, {
 });
 provide("flow", store);
 provide("flowPage", page);
-// in the launcher's panel the window's history is the page's around it
-provide("flowBesidePage", inPanel);
+// in the launcher's panel and on an app's page the window's history is the app's
+provide("flowBesidePage", !ownsWindow);
 // the agent's read_screen: the panel reads the page beside it and answers for the chat it shows. A
 // tab of its own has no page; it answers late, so a panel on the same chat is heard first
 const STANDALONE_DELAY = 1500;
@@ -250,8 +261,8 @@ socket.on("flow:read_screen", async (message) => {
 		// another panel on the chat answered first, or the call stopped waiting
 	}
 });
-// the page around the panel owns the theme, which the island follows
-if (!inPanel) useColorScheme();
+// the app around the chat owns the theme, which the island follows
+if (ownsWindow) useColorScheme();
 // the store keys a new chat's skills by folder; here they follow the chosen agent
 watch(
 	() => page.state.agent,
@@ -277,8 +288,8 @@ watch(
 
 // the launcher's panel, and a narrow frame worked by a mouse, have no sidebar: the chat's menu
 // lists the chats, and a narrow tab's gear leads to settings, which the panel leaves to Desk and
-// the /flow tab. A phone keeps the sidebar as a drawer
-const noSidebar = computed(() => !layout.phone && (layout.narrow || inPanel));
+// the /flow tab. A phone keeps the sidebar as a drawer. An app's page lists the chats itself
+const noSidebar = computed(() => embedded || (!layout.phone && (layout.narrow || inPanel)));
 provide("noSidebar", noSidebar);
 const sidebarOpen = computed(() => !noSidebar.value && store.state.sidebarOpen);
 // the sidebar menu's way to Desk and the other apps, asked for once a sidebar shows
@@ -347,6 +358,36 @@ function openInTab() {
 	window.open(`/flow${route.fullPath}`, "_blank", "noopener");
 	closePanel();
 }
+
+// on an app's page, what the header here would offer, for the app's own header: the chat's menu,
+// the chat list its clock opens in the panel and the transcript its token readout opens. A chat
+// picked from the list replaces a page, which may first ask about unsaved edits
+const history = ref(null);
+async function showHistory() {
+	if (await leavePage()) history.value.show();
+}
+const used = computed(() => hasUsage(store.state.conversation));
+const ownMenu = computed(() =>
+	Boolean(store.state.sessionId && store.state.session && !store.state.session.read_only)
+);
+const hostActions = computed(() => {
+	const actions = [
+		...chatActions.value,
+		{ label: __("All chats"), icon: "lucide-history", onClick: showHistory },
+		...(used.value
+			? [{ label: __("Transcript"), icon: "lucide-list", onClick: () => store.setTranscriptOpen(true) }]
+			: []),
+	];
+	const items = chatMenuItems(store, {
+		sessionId: ownMenu.value ? store.state.sessionId : null,
+		get title() {
+			return store.state.session?.title ?? conversationTitle(store.state.conversation) ?? "";
+		},
+		actions,
+	});
+	return items.map(({ label, icon, onClick }) => ({ label, icon, onClick }));
+});
+if (embedded) watch(hostActions, (actions) => host.actions(actions), { immediate: true });
 
 // the composer floats over the list, which pads by its measured height
 const composer = ref(null);
@@ -418,7 +459,8 @@ async function leavePage() {
 }
 provide("leavePage", leavePage);
 
-// the tab names the chat, or the page and its record as the page's bar does
+// the tab names the chat, or the page and its record as the page's bar does; an app's page names
+// it in its own header
 watch(
 	() => {
 		if (!pageKind.value) return store.state.session?.title;
@@ -426,8 +468,10 @@ watch(
 		return record === "new" ? __("New {0}", [SPECS[pageKind.value].singular]) : record;
 	},
 	(title) => {
-		if (!inPanel) document.title = title ? `${title} · Flow` : "Flow";
-	}
+		if (embedded) host?.title(title || null);
+		else if (ownsWindow) document.title = title ? `${title} · Flow` : "Flow";
+	},
+	{ immediate: embedded }
 );
 
 let uninstallShortcuts = null;
@@ -437,12 +481,13 @@ let unmeasure = null;
 onMounted(async () => {
 	// an island lays out by its own box, which a panel narrows; the page's width says nothing
 	unmeasure = measureLayoutBy(root.value);
-	if (!inPanel) uninstallShortcuts = installShortcuts(store);
+	// they capture the window's keys, which an app's page keeps
+	if (ownsWindow) uninstallShortcuts = installShortcuts(store);
 	uninstallFocusRings = installFocusRings(
 		...[root.value, root.value.getRootNode().host].filter(Boolean)
 	);
-	// the page around the panel owns the window's viewport
-	if (!inPanel) uninstallViewport = installViewport();
+	// the app around the chat owns the window's viewport
+	if (ownsWindow) uninstallViewport = installViewport();
 	store.refreshModels();
 	await store.refreshSessions();
 	// the route watcher, a click or a first message may have moved on while the list loaded,
@@ -459,10 +504,10 @@ onMounted(async () => {
 	)
 		store.openSession(wanted, { quiet: reopened(wanted) });
 });
-// in the panel, a chat the user didn't pick: the one it last showed, or Back to one, either of
-// which may since be gone. One an app asked for is picked
+// in the panel or on an app's page, a chat the user didn't pick: the one it last showed, or Back
+// to one, either of which may since be gone. One an app asked for is picked
 function reopened(id) {
-	return inPanel && id !== askedSession;
+	return !ownsWindow && id !== askedSession;
 }
 onBeforeUnmount(() => {
 	uninstallShortcuts?.();

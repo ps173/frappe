@@ -16,8 +16,8 @@
 					{{ user.full_name }}
 				</span>
 			</SettingsRow>
-			<!-- in a page's panel the page owns the theme, which the chat follows -->
-			<SettingsRow v-if="!inPanel" :title="__('Theme')" :description="__('Follow the system, or pick one.')">
+			<!-- in a page's panel or on an app's page, the app owns the theme, which the chat follows -->
+			<SettingsRow v-if="ownsWindow" :title="__('Theme')" :description="__('Follow the system, or pick one.')">
 				<Select
 					:model-value="colorScheme"
 					:options="THEMES"
@@ -43,7 +43,7 @@ import SettingsPage from "@flow/ui-core/components/SettingsPage.vue";
 import SettingsRow from "@flow/ui-core/components/SettingsRow.vue";
 import { __ } from "@flow/ui-core/translate.js";
 
-import { inPanel } from "../panel.js";
+import { ownsWindow } from "../panel.js";
 import DocForm from "./DocForm.vue";
 import { SPECS } from "./specs.js";
 
@@ -56,5 +56,5 @@ const flow = inject("flow");
 const page = inject("flowPage");
 const user = computed(() => page.state.boot.user ?? { name: "", full_name: "" });
 const siteSettings = computed(() => page.can("Flow Settings", "read"));
-const { colorScheme, setColorScheme } = inPanel ? {} : useColorScheme();
+const { colorScheme, setColorScheme } = ownsWindow ? useColorScheme() : {};
 </script>

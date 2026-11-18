@@ -1143,6 +1143,12 @@ export function conversationTitle(conversation) {
 	return line.length > 80 ? line.slice(0, 77) + "…" : line || null
 }
 
+// the header's token readout, and the transcript it opens, have something to say
+export function hasUsage(conversation) {
+	const { input, output } = conversation.usage
+	return (conversation.contextTokens ?? 0) > 0 || input + output > 0
+}
+
 // unix seconds → "14:32", with a date prefix once it's no longer today
 export function formatTime(ts) {
 	if (!ts) return ""

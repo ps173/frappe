@@ -8,10 +8,10 @@
 			<div v-if="error" class="max-w-md">
 				<div class="text-xl-medium text-ink-gray-9">{{ __("Flow could not start") }}</div>
 				<div class="mt-2 text-base text-ink-gray-6">{{ error }}</div>
-				<!-- in a panel the Desk is already the page around it -->
-				<div v-if="panel" class="mt-4 flex justify-center gap-2">
+				<!-- in a panel or on an app's page, the app is already the page around it -->
+				<div v-if="panel || embedded" class="mt-4 flex justify-center gap-2">
 					<Button :label="__('Reload')" variant="solid" @click="reload" />
-					<Button :label="__('Close')" @click="emit('close')" />
+					<Button v-if="panel" :label="__('Close')" @click="emit('close')" />
 				</div>
 				<a
 					v-else
@@ -37,12 +37,15 @@ import FlowPage from "./chat/FlowPage.vue";
 const props = defineProps({
 	boot: { type: Object, default: null },
 	panel: { type: String, default: null },
+	embedded: { type: Boolean, default: false },
 	path: { type: String, default: null },
 	asked: { type: String, default: null },
 });
-const emit = defineEmits(["close", "navigate"]);
+const emit = defineEmits(["close", "navigate", "title", "actions"]);
 provide("flowHost", {
 	close: () => emit("close"),
+	title: (title) => emit("title", title),
+	actions: (actions) => emit("actions", actions),
 });
 
 const boot = ref(null);

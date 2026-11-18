@@ -1,6 +1,7 @@
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { dialog, toast } from "frappe-ui";
 import { useDebouncedValue } from "@flow/ui-core/debounce.js";
+import { isPageEvent } from "@flow/ui-core/inert.js";
 import { __ } from "@flow/ui-core/translate.js";
 
 import { call } from "../api/frappe.js";
@@ -142,8 +143,9 @@ export function useRecord(props, emit) {
 
 	// pressed in the form's own dialog, or outside any for a form in none
 	function onKey(event) {
-		// in the launcher's panel, Cmd+S is the page's around it
-		if (inPanel) return;
+		// in the launcher's panel, Cmd+S is the page's around it; on an app's page, the app's
+		// outside the chat
+		if (inPanel || isPageEvent(event, form.value)) return;
 		if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
 			event.preventDefault();
 			const dialogOf = (el) => el?.closest?.("[role=dialog]") ?? null;

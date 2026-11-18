@@ -236,8 +236,11 @@ const compiled = new Map()
 async function componentURL(url) {
 	if (compiled.has(url.href)) return compiled.get(url.href)
 	const source = await readFile(url, "utf8")
-	const { descriptor } = parse(source, { filename: url.pathname })
-	let { content } = compileScript(descriptor, { id: url.pathname, inlineTemplate: true })
+	let content = source
+	if (url.pathname.endsWith(".vue")) {
+		const { descriptor } = parse(source, { filename: url.pathname })
+		content = compileScript(descriptor, { id: url.pathname, inlineTemplate: true }).content
+	}
 	const imports = [...content.matchAll(/\bfrom\s+["']([^"']+)["']/g)]
 	for (const match of imports.reverse()) {
 		const specifier = match[1]
@@ -253,6 +256,9 @@ async function componentURL(url) {
 		} else if (specifier.endsWith(".vue")) {
 			const name = specifier.split("/").pop()
 			resolved = components.has(name) ? await componentURL(new URL(specifier, url)) : stubURL(name.slice(0, -4))
+		} else if (specifier === "../chatMenu.js") {
+			// it opens frappe-ui's dialogs: compiled, so it gets the fake
+			resolved = await componentURL(new URL(specifier, url))
 		} else if (specifier === "frappe-ui/src/utils/dialog") {
 			resolved = dialogs
 		} else if (specifier === "frappe-ui/src/composables/useColorScheme") {

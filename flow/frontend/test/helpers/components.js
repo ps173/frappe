@@ -21,6 +21,7 @@ const real = new Set([
 	"SessionSidebar.vue",
 	"SidebarPeek.vue",
 	"ChatHeader.vue",
+	"ChatHistory.vue",
 	"ChatMenu.vue",
 	"TitleField.vue",
 	"ShareChat.vue",
@@ -136,8 +137,10 @@ const fakes = {
 				])
 			}
 		}
-		// the sidebar's shortcuts: nothing to press in a test
-		export function useKeyboardShortcut() {}
+		// the sidebar's shortcuts: nothing to press in a test, each kept to say what it binds
+		export const keyboardShortcuts = []
+		export function useKeyboardShortcut(shortcut) { keyboardShortcuts.push(shortcut) }
+		export const LoadingIndicator = stub("LoadingIndicator")
 		export function frappeRequest() {}
 		export const config = {}
 		export function setConfig(key, value) { config[key] = value }
@@ -239,13 +242,17 @@ const fakes = {
 		}
 		export function connectSocket() { return socket }
 	`),
-	// the island's entry: the mount records what it was given and runs its configure
+	// the island's entry: the mount records what it was given and, like the real one, installs
+	// the router (which starts its first navigation) before it runs configure
 	"@framework/ui/island": moduleURL(`
+		import { createApp } from ${JSON.stringify(vue)}
 		import { createMemoryHistory, createRouter } from ${JSON.stringify(import.meta.resolve("vue-router"))}
 		export const mounts = []
 		export async function mountVueIsland(el, options) {
 			const router = createRouter({ history: options.history ?? createMemoryHistory(), routes: options.routes })
-			options.configure?.({ config: { globalProperties: { $router: router } } })
+			const app = createApp({ render: () => null })
+			app.use(router)
+			options.configure?.(app)
 			mounts.push({ el, options, router })
 			return { shadow_root: { host: el }, update() {} }
 		}
@@ -256,9 +263,12 @@ const fakes = {
 fakes["./api/frappe.js"] = fakes["../api/frappe.js"];
 export const island = await import(fakes["@framework/ui/island"]);
 export const transport = await import(fakes["../api/frappe.js"]);
-export const { toast, dialog } = await import(fakes["frappe-ui"]);
+export const { toast, dialog, keyboardShortcuts } = await import(fakes["frappe-ui"]);
+// the core's dialogs (Rename, Delete), which a test fills in to see what they ask
+export const { dialog: coreDialog } = await import(fakes["frappe-ui/src/utils/dialog"]);
 
 const compiled = new Map();
+const COMPILED_CORE = new Set(["@flow/ui-core/chatMenu.js"]);
 async function componentURL(url) {
 	if (compiled.has(url.href)) return compiled.get(url.href);
 	const source = await readFile(url, "utf8");
@@ -280,6 +290,9 @@ async function componentURL(url) {
 				: stubURL(name.slice(0, -4));
 		} else if (specifier.startsWith("."))
 			// a relative module of this app: compile it too, so its own .vue imports resolve
+			resolved = await componentURL(targetURL(specifier, url));
+		else if (COMPILED_CORE.has(specifier))
+			// a core module that opens frappe-ui's dialogs, compiled so it gets the fake
 			resolved = await componentURL(targetURL(specifier, url));
 		else resolved = targetURL(specifier, url).href;
 		content =

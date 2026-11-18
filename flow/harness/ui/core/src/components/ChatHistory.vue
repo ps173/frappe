@@ -2,6 +2,7 @@
 	<!-- its list hangs under it, over the composer; rows a menu's height, a chat's title each -->
 	<span class="relative z-20">
 		<Button
+			v-if="clock"
 			ref="trigger"
 			variant="ghost"
 			icon="lucide-history"
@@ -66,7 +67,9 @@ import { layout } from "../layout.js"
 import { __ } from "../translate.js"
 import PalettePanel from "./PalettePanel.vue"
 
-// The chats, under a clock in a header with no sidebar beside it: the sidebar's list and search
+// The chats, under a clock in a header with no sidebar beside it: the sidebar's list and search.
+// Without its clock, a host whose own header has the button opens it with show()
+defineProps({ clock: { type: Boolean, default: true } })
 const flow = inject("flow")
 const open = ref(false)
 const search = ref("")
@@ -100,4 +103,6 @@ function choose(id) {
 	close(false)
 	if (id !== flow.state.sessionId) flow.openSession(id)
 }
+
+defineExpose({ show })
 </script>

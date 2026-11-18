@@ -34,9 +34,9 @@ const { createRouter, createWebHistory } = await import("vue-router");
 const { routes } = await import("../src/router.js");
 // as the island on /flow runs them
 const router = createRouter({ history: createWebHistory("/flow"), routes });
-const { loadComponent, loadModule, transport } = await import("./helpers/components.js");
+const { coreDialog, loadComponent, loadModule, transport } = await import("./helpers/components.js");
 // the copy the compiled components import
-const { setPanel } = await loadModule("panel.js");
+const { setEmbedded, setPanel } = await loadModule("panel.js");
 const FlowPage = await loadComponent("chat/FlowPage.vue");
 const ShareChat = await loadComponent("chat/ShareChat.vue");
 const SetupState = await loadComponent("chat/SetupState.vue");
@@ -993,4 +993,192 @@ test("a first message sent while the chat list loads keeps the page on its new c
 	await new Promise((resolve) => setTimeout(resolve, 30));
 	assert.equal(router.currentRoute.value.path, "/");
 	assert.ok(!called("frappe.flow.api.session"));
+});
+
+test("on an app's page the chat is only the conversation, flat on its own surface; it reports its title to the app and leaves the window's keys, title and history to it", async (t) => {
+	const { keyboardShortcuts } = await import("./helpers/components.js");
+	const saved = { ...transport.answers };
+	setEmbedded(true);
+	t.after(() => {
+		Object.assign(transport.answers, saved);
+		setEmbedded(false);
+	});
+	transport.answers["frappe.flow.api.session"] = { ...session, name: "titled", title: "Q3 plan" };
+	await router.replace("/");
+	transport.calls.length = 0;
+	keyboardShortcuts.length = 0;
+	document.title = "Chat - CRM";
+	const titles = [];
+	const el = document.createElement("div");
+	document.body.append(el);
+	const admin = { ...boot, permissions: { "Flow Model": ["read", "write", "create", "delete"] } };
+	const app = createApp(FlowPage, { boot: admin }).use(router);
+	app.provide("flowHost", { title: (title) => titles.push(title), actions() {} });
+	app.mount(el);
+	t.after(() => {
+		app.unmount();
+		el.remove();
+	});
+	await until(() => called("frappe.flow.api.list_sessions"));
+
+	// the app's own sidebar lists the chats
+	assert.equal(el.querySelector("aside"), null);
+	assert.equal(el.querySelector("button[title='Show sidebar']"), null);
+	assert.ok(!called("frappe.apps.get_apps"));
+	assert.ok(!keyboardShortcuts.some((shortcut) => shortcut.combo === "Mod+K"));
+	// one surface with the app's page: no raised card on the sidebar's colour
+	const root = el.firstElementChild;
+	assert.ok(!root.classList.contains("flow-sidebar-surface"));
+	assert.ok(root.classList.contains("bg-surface-base"));
+	const surface = el.querySelector("main").parentElement;
+	assert.ok(!["md:m-1", "md:rounded-5", "md:shadow-sm"].some((name) => surface.classList.contains(name)));
+	assert.ok(!el.querySelector("button[title='Close']"));
+	assert.ok(!el.querySelector("button[title='Open in new tab']"));
+	// Cmd/Ctrl+B and Cmd/Ctrl+, are the app's
+	for (const key of ["b", ","]) {
+		const press = new dom.window.KeyboardEvent("keydown", { key, metaKey: true, cancelable: true });
+		window.dispatchEvent(press);
+		assert.equal(press.defaultPrevented, false);
+	}
+
+	// told at mount too, so the app's header is right from the start
+	assert.deepEqual(titles, [null]);
+	await router.replace("/s/titled");
+	await until(() => titles.length > 1);
+	assert.deepEqual(titles, [null, "Q3 plan"]);
+	await router.replace("/");
+	await until(() => titles.length > 2);
+	assert.deepEqual(titles, [null, "Q3 plan", null]);
+	assert.equal(document.title, "Chat - CRM");
+
+	// a record page leads back to the chat, with no list to float
+	await router.replace("/models/new");
+	await until(() => el.querySelector("button[title='Back to chat']"));
+	assert.equal(el.querySelector("button[title='Show sidebar']"), null);
+});
+
+test("an app's page that cannot start the chat offers a reload and no close", async (t) => {
+	const App = await loadComponent("App.vue");
+	const saved = { ...transport.answers };
+	transport.answers["frappe.flow.api.boot"] = () => {
+		throw new Error("down");
+	};
+	t.after(() => Object.assign(transport.answers, saved));
+	const labels = async (props) => {
+		const el = document.createElement("div");
+		const app = createApp(App, props);
+		app.mount(el);
+		t.after(() => app.unmount());
+		await until(() => el.textContent.includes("down"));
+		return [...el.querySelectorAll("button")].map((button) => button.textContent);
+	};
+	assert.deepEqual(await labels({ embedded: true }), ["Reload"]);
+	assert.deepEqual(await labels({ panel: "app" }), ["Reload", "Close"]);
+});
+
+test("on an app's page the chat draws no header: the app's header gets its title and its actions from the island, at mount and as they change", async (t) => {
+	const App = await loadComponent("App.vue");
+	const saved = { ...transport.answers };
+	const savedDialog = { ...coreDialog };
+	setEmbedded(true);
+	t.after(() => {
+		Object.assign(transport.answers, saved);
+		Object.assign(coreDialog, savedDialog);
+		setEmbedded(false);
+	});
+	const chats = {
+		mine: { title: "Q3 plan" },
+		theirs: { title: "Their plan", owner: "owner@example.com", read_only: true },
+		hiring: { title: "Hiring" },
+	};
+	transport.answers["frappe.flow.api.list_sessions"] = [
+		{ name: "mine", title: "Q3 plan" },
+		{ name: "hiring", title: "Hiring" },
+	];
+	transport.answers["frappe.flow.api.session"] = ({ session: name }) => ({ ...session, name, ...chats[name] });
+	// a chat that has spent tokens
+	const spent = { type: "usage", seq: 1, ts: 1, input_tokens: 1000, output_tokens: 200 };
+	transport.answers["frappe.flow.api.entries"] = ({ session: name }) => ({
+		entries: name === "mine" ? [spent] : [],
+		latest_seq: name === "mine" ? 1 : 0,
+		preview: [],
+	});
+	await router.replace("/s/mine");
+	const titles = [];
+	const reports = [];
+	const el = document.createElement("div");
+	document.body.append(el);
+	const app = createApp(App, {
+		boot,
+		embedded: true,
+		onTitle: (title) => titles.push(title),
+		onActions: (actions) => reports.push(actions),
+	}).use(router);
+	app.mount(el);
+	t.after(() => {
+		app.unmount();
+		el.remove();
+	});
+	const latest = () => reports.at(-1) ?? [];
+	const labels = () => latest().map((action) => action.label);
+	const action = (label) => latest().find((item) => item.label === label);
+	const all = (actions) => ({
+		label: "All chats",
+		icon: "lucide-history",
+		onClick: actions.find((item) => item.label === "All chats")?.onClick,
+	});
+
+	await until(() => labels().includes("Rename"));
+	assert.equal(el.querySelector("header"), null);
+	assert.equal(el.querySelector("aside"), null);
+	assert.deepEqual(reports[0], [all(reports[0])], "at mount, before the chat loads, only the list applies");
+	assert.deepEqual(titles, [null, "Q3 plan"]);
+	// the header's chat menu, the chat list its clock opened in the panel, and the transcript its
+	// token readout opened
+	assert.deepEqual(latest(), [
+		{ label: "Share", icon: "lucide-share-2", onClick: action("Share").onClick },
+		{ label: "All chats", icon: "lucide-history", onClick: action("All chats").onClick },
+		{ label: "Transcript", icon: "lucide-list", onClick: action("Transcript").onClick },
+		{ label: "Rename", icon: "lucide-pen", onClick: action("Rename").onClick },
+		{ label: "Delete", icon: "lucide-trash-2", onClick: action("Delete").onClick },
+	]);
+	const reported = reports.length;
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(reports.length, reported, "nothing new to say, nothing reported");
+
+	// Rename and Delete ask as the chat menu's do
+	const asked = [];
+	coreDialog.prompt = (options) => asked.push(options);
+	coreDialog.confirm = (options) => asked.push(options);
+	action("Rename").onClick();
+	action("Delete").onClick();
+	await until(() => asked.length === 2);
+	assert.equal(asked[0].title, "Rename chat");
+	assert.equal(asked[0].fields[0].defaultValue, "Q3 plan");
+	assert.equal(asked[1].title, "Delete chat?");
+
+	// All chats opens the panel's list of recent chats, where a row opens its chat
+	const recent = () => el.querySelector("[data-stub=PalettePanel][title='Recent chats']");
+	assert.equal(recent(), null);
+	action("All chats").onClick();
+	await until(recent);
+	const rows = [...recent().querySelectorAll("[data-palette-item]")];
+	assert.deepEqual(
+		rows.map((row) => row.textContent),
+		["Q3 plan", "Hiring"]
+	);
+	rows[1].click();
+	await until(() => titles.at(-1) === "Hiring");
+	assert.equal(router.currentRoute.value.path, "/s/hiring");
+	assert.equal(recent(), null);
+
+	// a chat the user may only view offers nothing to do to it, but the list
+	await router.replace("/s/theirs");
+	await until(() => titles.at(-1) === "Their plan" && labels().join() === "All chats");
+
+	// nor does a new chat
+	await router.replace("/s/mine");
+	await until(() => labels().includes("Rename"));
+	await router.replace("/");
+	await until(() => titles.at(-1) === null && labels().join() === "All chats");
 });

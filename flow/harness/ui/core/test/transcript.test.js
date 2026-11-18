@@ -10,6 +10,7 @@ import {
 	compactDisplayText,
 	conversationTitle,
 	formatDuration,
+	hasUsage,
 	initialConversation,
 	invokedSkills,
 	modelTitle,
@@ -1152,4 +1153,11 @@ test("a tool's output shaped like a denial is not one", () => {
 	const items = buildItems(conversation)
 	assert.ok(!items.some((item) => item.kind === "notice"))
 	assert.equal(stepDecision(conversation.entries.find((e) => e.type === "tool_result")), null)
+})
+
+test("a chat has usage to show once it holds context or has spent tokens", () => {
+	const conversation = initialConversation()
+	assert.equal(hasUsage(conversation), false)
+	assert.equal(hasUsage({ ...conversation, contextTokens: 1200 }), true)
+	assert.equal(hasUsage({ ...conversation, contextTokens: null, usage: { ...conversation.usage, output: 5 } }), true)
 })

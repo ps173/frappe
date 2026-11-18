@@ -62,7 +62,7 @@
 			<!-- the readout opens the transcript: the same totals, step by step. A narrow frame leaves
 			     the title the room: its chat menu opens the transcript instead -->
 			<button
-				v-if="!layout.narrow && (contextTokens > 0 || spent > 0)"
+				v-if="!layout.narrow && used"
 				class="mr-2 flex items-center gap-2 whitespace-nowrap rounded-4 px-1.5 py-1 text-sm font-normal tabular-nums text-ink-gray-5 hover:bg-surface-gray-2"
 				:title="__('Tokens, step by step')"
 				@click="flow.setTranscriptOpen(true)"
@@ -124,7 +124,7 @@ import { Button } from "frappe-ui/src/components/Button"
 import Dropdown from "frappe-ui/src/components/Dropdown/Dropdown.vue"
 
 import { layout } from "../layout.js"
-import { conversationTitle, formatCost, formatTokens } from "../transcript.js"
+import { conversationTitle, formatCost, formatTokens, hasUsage } from "../transcript.js"
 import { __ } from "../translate.js"
 import ChatHistory from "./ChatHistory.vue"
 import ChatMenu from "./ChatMenu.vue"
@@ -183,10 +183,11 @@ const spent = computed(() => {
 })
 const contextTokens = computed(() => flow.state.conversation.contextTokens ?? 0)
 const contextWindow = computed(() => flow.state.conversation.contextWindow ?? null)
+const used = computed(() => hasUsage(flow.state.conversation))
 
 // a narrow frame's chat menu opens the transcript in the readout's place
 const menuActions = computed(() => [
-	...(layout.narrow && (contextTokens.value > 0 || spent.value > 0)
+	...(layout.narrow && used.value
 		? [{ label: __("Transcript"), icon: "lucide-list", onClick: () => flow.setTranscriptOpen(true) }]
 		: []),
 	...props.actions,

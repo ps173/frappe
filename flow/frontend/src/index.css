@@ -31,8 +31,10 @@
 }
 
 /* the panel's dialogs and menus cover the window, so they lay out by its width: the portal is a
-   container as wide as the window, and no taller than before, so it covers nothing itself */
-:host([data-panel]) .frappe-island-portal {
+   container as wide as the window, and no taller than before, so it covers nothing itself. On an
+   app's page the island is narrower than the window by the app's sidebar */
+:host([data-panel]) .frappe-island-portal,
+:host([data-flow-embedded]) .frappe-island-portal {
 	container-type: inline-size;
 	inset: 0 auto auto 0 !important;
 	width: 100vw !important;

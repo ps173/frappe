@@ -18,6 +18,12 @@ test("in a page's panel, an event from outside the chat's island is the page's",
 	assert.equal(isPageEvent(event("textarea", host, "body"), el), false)
 })
 
+test("on an app's page, an event from outside the chat's island is the app's", () => {
+	const { host, el } = island({ "data-flow-embedded": "" })
+	assert.equal(isPageEvent(event("crmInput", "body"), el), true)
+	assert.equal(isPageEvent(event("button", host, "body"), el), false)
+})
+
 test("a chat that has the page to itself hears every event", () => {
 	const { el } = island()
 	assert.equal(isPageEvent(event("body"), el), false)
